@@ -20,7 +20,7 @@ let imageManager: ImageProcessor;
 let lastBuildDirectory = '';
 let mountCount = 0;
 
-export function setupImageProcessor(imageProcessorName: string, k8sManager: K8s.KubernetesBackend) {
+export function setupImageProcessor(imageProcessorName: string, k8sManager: K8s.KubernetesBackend): ImageProcessor {
   imageManager = imageManager ?? createImageProcessor(imageProcessorName, k8sManager);
 
   interface ImageContents {
@@ -178,4 +178,6 @@ export function setupImageProcessor(imageProcessorName: string, k8sManager: K8s.
   Electron.ipcMain.handle('images-check-state', () => {
     return imageManager.isReady;
   });
+
+  return imageManager;
 }
