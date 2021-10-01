@@ -1,4 +1,4 @@
-// Kuberentes backend for Windows, based on WSL2 + k3s
+// Kubernetes backend for Windows, based on WSL2 + k3s
 
 import { Console } from 'console';
 import crypto from 'crypto';
