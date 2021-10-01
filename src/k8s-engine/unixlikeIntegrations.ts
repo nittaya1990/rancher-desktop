@@ -7,6 +7,7 @@ import resources from '@/resources';
 import PathConflictManager from '@/main/pathConflictManager';
 import * as window from '@/window';
 
+// TODO: Remove 'kim' when we stop shipping kim
 const INTEGRATIONS = ['helm', 'kim', 'kubectl', 'nerdctl'];
 const console = new Console(Logging.background.stream);
 const PUBLIC_LINK_DIR = '/usr/local/bin';
