@@ -26,7 +26,8 @@ import buildApplicationMenu from '@/main/mainmenu';
 
 Electron.app.setName('Rancher Desktop');
 
-// Maybe let people switch this on the fly
+// If/when we support more than one image processor this will be a pref with a watcher
+// for changes, but it's fine as a constant now.
 const ImageProviderName = 'nerdctl';
 const console = new Console(Logging.background.stream);
 
