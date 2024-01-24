@@ -3,35 +3,49 @@
     "target": "ES2018",
     "module": "ESNext",
     "moduleResolution": "Node",
+    "jsx": "react",
     "lib": [
       "ESNext",
-      "ESNext.AsyncIterable"
+      "ESNext.AsyncIterable",
+      "DOM"
     ],
     "esModuleInterop": true,
     "allowJs": true,
     "sourceMap": true,
     "strict": true,
+    "experimentalDecorators": true,
     "baseUrl": ".",
     "paths": {
-      "~/*": [
-        "src/*"
+      "@pkg/*": [
+        "pkg/rancher-desktop/*"
       ],
-      "@/*": [
-        "src/*"
+      "@shell/*": [
+        "./node_modules/@rancher/shell/*"
       ]
     },
+    "typeRoots": [
+      "./node_modules",
+      "./node_modules/@types",
+      "./node_modules/@rancher/shell/types"
+    ],    
     "types": [
-      "node",
-      "jest"
+      "@types/node",
+      "@types/jest"
     ]
   },
   "exclude": [
     "node_modules",
     ".nuxt",
-    "dist"
+    "dist",
+    "scripts/lib/installer-*.tsx",
+    "scripts/lib/installer-win32-gen.tsx"
   ],
   "include": [
     "**/*",
+    "**/*.ts",
+    "**/*.d.ts",
+    "**/*.tsx",
+    "**/*.vue",
     ".eslintrc.js"
   ]
 }

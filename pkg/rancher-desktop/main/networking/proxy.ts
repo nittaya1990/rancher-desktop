@@ -1,0 +1,126 @@
+import http from 'http';
+import { AgentOptions as HttpsAgentOptions } from 'https';
+import net from 'net';
+import stream from 'stream';
+import tls from 'tls';
+import { URL } from 'url';
+
+import { Agent, ClientRequest, RequestOptions, AgentCallbackReturn } from 'agent-base';
+import Electron from 'electron';
+import { HttpProxyAgent } from 'http-proxy-agent';
+import { HttpsProxyAgent, HttpsProxyAgentOptions } from 'https-proxy-agent';
+import { SocksProxyAgent } from 'socks-proxy-agent';
+
+import Logging from '@pkg/utils/logging';
+
+const console = Logging.background;
+
+interface HttpConnectOpts extends net.TcpNetConnectOpts {
+  secureEndpoint: false;
+}
+interface HttpsConnectOpts extends tls.ConnectionOptions {
+  port: number;
+  secureEndpoint: true;
+}
+
+type CustomAgentConnectOpts = HttpConnectOpts | HttpsConnectOpts;
+
+export default class ElectronProxyAgent extends Agent {
+  protected session: Electron.Session;
+
+  constructor(options?: HttpsAgentOptions, session?: Electron.Session) {
+    super();
+    this.options = options || this.options || {};
+    this.session = session || Electron.session.defaultSession;
+  }
+
+  async callback(req: ClientRequest, opts: RequestOptions): Promise<AgentCallbackReturn> {
+    const port = opts.port || (opts.secureEndpoint ? 443 : 80);
+    const requestURL = new URL(`${ req.protocol }//${ req.host }:${ port }/${ req.path }`);
+    const mergedOptions = Object.assign({}, this.options, opts);
+
+    // proxies is a string as in a proxy auto-config file
+    // https://en.wikipedia.org/wiki/Proxy_auto-config
+    const proxies = (await this.session.resolveProxy(requestURL.toString())) || 'DIRECT';
+
+    for (const proxy of proxies.split(';').concat(['DIRECT'])) {
+      const [, mode, host] = /\s*(\S+)\s*((?:\S+?:\d+)?)/.exec(proxy) || [];
+
+      switch (mode) {
+      case 'DIRECT': {
+        const createConnection: ((options: http.ClientRequestArgs, ...args: any) => stream.Duplex) | undefined =
+          (this as any).createConnection;
+
+        if (opts.secureEndpoint) {
+          const sslOptions = Object.assign({},
+            mergedOptions,
+            { servername: req.host.replace(/:\d+$/, '') },
+          );
+
+          delete sslOptions.path;
+
+          return (createConnection ?? tls.connect)(sslOptions);
+        } else {
+          return (createConnection ?? net.connect)(mergedOptions);
+        }
+      }
+      case 'SOCKS': case 'SOCKS4': case 'SOCKS5':
+        return new CustomSocksProxyAgent(`socks://${ host }`, this.options);
+      case 'PROXY': case 'HTTP': case 'HTTPS': {
+        const protocol = mode === 'HTTPS' ? 'https' : 'http';
+        const proxyURL = `${ protocol }://${ host }`;
+
+        if (opts.secureEndpoint) {
+          return new CustomHttpsProxyAgent(proxyURL, this.options);
+        } else {
+          return new HttpProxyAgent(proxyURL);
+        }
+      }
+      default:
+        console.log(`Skipping unknown proxy configuration ${ mode } ${ host }`);
+      }
+    }
+
+    throw new Error('Went past no proxies');
+  }
+}
+
+class CustomHttpsProxyAgent<Uri extends string> extends HttpsProxyAgent<Uri> {
+  constructor(proxy: Uri | URL, opts?: HttpsProxyAgentOptions<Uri>) {
+    // Use object destructing here to ensure we only get wanted properties.
+    const { hostname, port, protocol } = new URL(proxy.toString());
+    const mergedOpts = Object.assign({}, opts, {
+      hostname, port, protocol,
+    });
+
+    super(proxy, mergedOpts);
+    if (opts) {
+      this.options = opts;
+    }
+  }
+
+  async connect(req: http.ClientRequest, opts: CustomAgentConnectOpts): Promise<net.Socket> {
+    const mergedOptions = Object.assign({}, this.options, opts);
+
+    return await super.connect(req, mergedOptions);
+  }
+}
+
+class CustomSocksProxyAgent extends SocksProxyAgent {
+  constructor(proxyURL: string, opts: HttpsAgentOptions) {
+    // Use object destructing here to ensure we only get wanted properties.
+    const { hostname, port, protocol } = new URL(proxyURL);
+    const mergedOpts = Object.assign({}, opts, {
+      hostname, port, protocol,
+    });
+
+    super(proxyURL, mergedOpts);
+    this.options = opts;
+  }
+
+  callback(req: ClientRequest, opts: RequestOptions): Promise<net.Socket> {
+    const mergedOptions: CustomAgentConnectOpts = Object.assign({}, this.options, opts);
+
+    return super.connect(req, mergedOptions);
+  }
+}

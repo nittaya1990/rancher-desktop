@@ -1,0 +1,46 @@
+# copyright needs to stay in sync with message in About panel in background.ts
+copyright: Copyright © 2021-2023 SUSE LLC
+productName: Rancher Desktop
+icon: ./resources/icons/logo-square-512.png
+appId: io.rancherdesktop.app
+asar: true
+extraResources:
+- resources/
+- '!resources/darwin/lima*.tgz'
+- '!resources/linux/lima*.tgz'
+- '!resources/host/'
+files:
+- dist/app/**/*
+- '!**/node_modules/*/prebuilds/!(${platform}*)/*.node'
+mac:
+  darkModeSupport: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  extendInfo:
+    NSCameraUsageDescription: ~
+    NSMicrophoneUsageDescription: ~
+  icon: ./resources/icons/mac-icon.png
+  target: [ dmg, zip ]
+  identity: ~ # We sign in a separate step
+  extraFiles:
+  - build/signing-config-mac.yaml
+  - { from: dist/electron-builder.yaml, to: electron-builder.yml }
+win:
+  target: [ zip ]
+  signingHashAlgorithms: [ sha256 ] # We only support Windows 10 + WSL2
+  requestedExecutionLevel: asInvoker # The _app_ doesn't need privileges
+  extraFiles:
+  - build/wix/*
+  - build/license.rtf
+  - build/signing-config-win.yaml
+  - { from: dist/wix-custom-action.dll, to: wix-custom-action.dll }
+  - { from: dist/electron-builder.yaml, to: electron-builder.yml }
+linux:
+  category: Utility
+  executableName: rancher-desktop
+  artifactName: ${name}-${version}-linux.zip
+  target: [ zip ]
+publish:
+  provider: custom
+  upgradeServer: https://desktop.version.rancher.io/v1/checkupgrade
+  vPrefixedTagName: true

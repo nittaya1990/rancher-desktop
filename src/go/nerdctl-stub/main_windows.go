@@ -94,6 +94,11 @@ func volumeArgHandler(arg string) (string, []cleanupFunc, error) {
 	return wslHostPath + ":" + containerPath + readWrite, nil, nil
 }
 
+// mountArgHandler handles the argument for `nerdctl run --mount=...`
+func mountArgHandler(arg string) (string, []cleanupFunc, error) {
+	return mountArgProcessor(arg, pathToWSL)
+}
+
 // filePathArgHandler handles arguments that take a file path for input
 func filePathArgHandler(arg string) (string, []cleanupFunc, error) {
 	result, err := pathToWSL(arg)
@@ -111,4 +116,19 @@ func outputPathArgHandler(arg string) (string, []cleanupFunc, error) {
 		return "", nil, err
 	}
 	return result, nil, nil
+}
+
+// builderCacheArgHandler handles arguments for
+// `nerdctl builder build --cache-from=` and `nerdctl builder build --cache-to=`
+func builderCacheArgHandler(arg string) (string, []cleanupFunc, error) {
+	return builderCacheProcessor(arg, filePathArgHandler, outputPathArgHandler)
+}
+
+// argHandlers is the table of argument handlers.
+var argHandlers = argHandlersType{
+	volumeArgHandler:       volumeArgHandler,
+	filePathArgHandler:     filePathArgHandler,
+	outputPathArgHandler:   outputPathArgHandler,
+	mountArgHandler:        mountArgHandler,
+	builderCacheArgHandler: builderCacheArgHandler,
 }

@@ -1,0 +1,117 @@
+version: 2
+updates:
+
+  # Maintain dependencies for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 5
+    labels: ["component/dependencies"]
+
+  # Maintain dependencies for npm
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 5
+    labels: ["component/dependencies"]
+    ignore:
+      - # Needs to be updated along with NodeJS version.
+        dependency-name: "@types/node"
+        versions: [ ">18" ]
+      - # Need to migrate to Vue 3 before moving beyond 2.7.x.
+        dependency-name: "vue"
+        versions: [ ">2.7" ]
+      - # Current Vue config targets webpack 5.
+        dependency-name: "webpack"
+        versions: [ ">5" ]
+      - # node-fetch 3+ requires ECMAScript modules, but Electron doesn't
+        # support that. See https://github.com/electron/electron/issues/21457
+        dependency-name: "node-fetch"
+        versions: [ ">2" ]
+      - # This needs to be done in lockstep with node-fetch.
+        dependency-name: "@types/node-fetch"
+        versions: [ ">2" ]
+      - # We don't utilize @rancher/shell in a meaningful way. It is safe to
+        # ignore until we arrive a solution that uses it.
+        dependency-name: "@rancher/shell"
+        versions: [ ">0.1" ]
+      - # unfetch release 5.0.0 dropped necessary files.
+        # See https://github.com/developit/unfetch/issues/ 162, 163, 167, 172, 176
+        # Not the best-maintained library out there.
+        # It's used only by the nuxt pseudo-submodule
+        # Assume the next release will fix it.
+        dependency-name: "unfetch"
+        versions: [ "5.0.0" ]
+
+  # Maintain dependencies for Golang
+  - package-ecosystem: "gomod"
+    directory: "/src/go/docker-credential-none"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 1
+    labels: ["component/dependencies"]
+    reviewers: [ "ericpromislow" ]
+
+  - package-ecosystem: "gomod"
+    directory: "/src/go/extension-proxy"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 1
+    labels: ["component/dependencies"]
+    reviewers: [ "Nino-K" ]
+
+  - package-ecosystem: "gomod"
+    directory: "/src/go/github-runner-monitor"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 1
+    labels: ["component/dependencies"]
+    reviewers: [ "mook-as" ]
+
+  - package-ecosystem: "gomod"
+    directory: "/src/go/mock-wsl"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 1
+    labels: ["component/dependencies"]
+    reviewers: [ "Nino-K" ]
+
+  - package-ecosystem: "gomod"
+    directory: "/src/go/nerdctl-stub"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 1
+    labels: ["component/dependencies"]
+    reviewers: [ "Nino-K" ]
+
+  - package-ecosystem: "gomod"
+    directory: "/src/go/rdctl"
+    ignore:
+      # This is generated when running `postinstall` and not available to dependabot.
+      - dependency-name: "github.com/rancher-sandbox/rancher-desktop/src/go/rdctl/pkg/generated/options"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 1
+    labels: ["component/dependencies"]
+    reviewers: [ "ericpromislow" ]
+
+  - package-ecosystem: "gomod"
+    directory: "/src/go/vtunnel"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 1
+    labels: ["component/dependencies"]
+    reviewers: [ "Nino-K" ]
+
+  - package-ecosystem: "gomod"
+    directory: "/src/go/wsl-helper"
+    ignore:
+    # This is generated when running `postinstall` and not available to dependabot.
+    - dependency-name: "github.com/rancher-sandbox/rancher-desktop/src/go/wsl-helper/pkg/dockerproxy/models"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 1
+    labels: ["component/dependencies"]
+    reviewers: [ "Nino-K" ]

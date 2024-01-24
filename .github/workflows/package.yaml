@@ -5,8 +5,10 @@ on:
   push:
     branches:
       - main
+      - release-*
     tags:
       - '*'
+  workflow_dispatch: {}
 
 defaults:
   run:
@@ -16,61 +18,255 @@ jobs:
   package:
     strategy:
       matrix:
-        os:
-        - macos-10.15
-        - windows-2019
-    runs-on: ${{ matrix.os }}
+        include:
+        - platform: mac
+          arch: x86_64
+          runs-on: macos-11
+        - platform: mac
+          arch: aarch64
+          runs-on: macos-11
+        - platform: win
+          runs-on: windows-2019
+        - platform: linux
+          runs-on: ubuntu-20.04
+    runs-on: ${{ matrix.runs-on }}
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         persist-credentials: false
         # Needed to run `git describe` to get full version info
         fetch-depth: 0
-    - uses: actions/setup-node@v2
+    - uses: actions/setup-node@v4
       with:
-        node-version: '14.x'
-    - uses: actions/setup-python@v2
+        node-version: '18.16.x'
+        cache: yarn
+    - uses: actions/setup-python@v5
       with:
-        python-version: '2.x'
-    - uses: actions/setup-go@v2
+        python-version: '3.x'
+    - uses: actions/setup-go@v5
       with:
-        go-version: '^1.16'
+        go-version: '^1.21'
+        cache-dependency-path: src/go/**/go.sum
     - name: Install Windows dependencies
-      if: startsWith(matrix.os, 'windows-')
+      if: runner.os == 'Windows'
       shell: powershell
       run: .\scripts\windows-setup.ps1 -SkipVisualStudio -SkipTools
-    - run: npm ci
-    - name: npm run build
-      run: |
-        case "${{ matrix.os }}" in
-          macos-*)
-            npm run build -- --mac --publish=never
-            ;;
-          windows-*)
-            npm run build -- --win --publish=never
-            ;;
-        esac
-    - uses: actions/upload-artifact@v2
-      if: startsWith(matrix.os, 'macos-')
+    - name: Flag build for M1
+      if: matrix.arch == 'aarch64' && matrix.platform == 'mac'
+      run: echo "M1=1" >> "${GITHUB_ENV}"
+    - run: pip install setuptools
+    - # Needs a network timeout for macos & windows. See https://github.com/yarnpkg/yarn/issues/8242 for more info
+      run: yarn install --frozen-lockfile --network-timeout 1000000
+    - run: yarn build
+    - run: yarn package
+    - name: Build bats.tar.gz
+      if: matrix.platform == 'linux'
+      run: make -C bats bats.tar.gz
+    - name: Upload bats.tar.gz
+      uses: actions/upload-artifact@v4
+      if: matrix.platform == 'linux'
       with:
-        name: Rancher Desktop.dmg
+        name: bats.tar.gz
+        path: bats/bats.tar.gz
+        if-no-files-found: error
+    - name: Upload mac disk image
+      uses: actions/upload-artifact@v4
+      if: matrix.platform == 'mac'
+      with:
+        name: Rancher Desktop.${{ matrix.arch }}.dmg
         path: dist/Rancher Desktop*.dmg
         if-no-files-found: error
-    - uses: actions/upload-artifact@v2
-      if: startsWith(matrix.os, 'macos-')
+    - name: Upload mac zip
+      uses: actions/upload-artifact@v4
+      if: matrix.platform == 'mac'
       with:
-        name: Rancher Desktop-mac.zip
-        path: dist/Rancher Desktop*-mac.zip
+        name: Rancher Desktop-mac.${{ matrix.arch }}.zip
+        path: dist/Rancher Desktop*.zip
         if-no-files-found: error
-    - uses: actions/upload-artifact@v2
-      if: startsWith(matrix.os, 'windows-')
+    - name: Upload Windows installer
+      uses: actions/upload-artifact@v4
+      if: matrix.platform == 'win'
       with:
-        name: Rancher Desktop Setup.exe
-        path: dist/Rancher Desktop*.exe
+        name: Rancher Desktop Setup.msi
+        path: dist/Rancher Desktop*.msi
         if-no-files-found: error
-    - uses: actions/upload-artifact@v2
-      if: startsWith(matrix.os, 'windows-')
+    - name: Upload Windows zip
+      uses: actions/upload-artifact@v4
+      if: matrix.platform == 'win'
       with:
         name: Rancher Desktop-win.zip
         path: dist/Rancher Desktop-*-win.zip
         if-no-files-found: error
+    - name: Upload Linux zip
+      uses: actions/upload-artifact@v4
+      if: matrix.platform == 'linux'
+      with:
+        name: Rancher Desktop-linux.zip
+        path: dist/rancher-desktop-*-linux.zip
+        if-no-files-found: error
+    - id: has_s3
+      name: Check if S3 secrets are available
+      continue-on-error: true
+      if: github.ref_type == 'branch' && ( startsWith(github.ref_name, 'main') || startsWith(github.ref_name, 'release-') )
+      run: '[[ -n "${key}" ]]'
+      env:
+        key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    - name: set zip_name env var
+      id: zip_name
+      if: matrix.platform == 'linux' && steps.has_s3.outcome == 'success'
+      run: |
+        # in pull requests GITHUB_REF_NAME is in the form "<pr_number>/merge";
+        # remove slashes since they aren't valid in filenames
+        no_slash_ref_name="${GITHUB_REF_NAME//\//-/}"
+        zip_name="rancher-desktop-linux-${no_slash_ref_name}.zip"
+        echo "zip_name=${zip_name}" >> "${GITHUB_OUTPUT}"
+    - name: Copy zip file to S3
+      uses: prewk/s3-cp-action@74701625561055a306f92fa5c18e948f9d14a54a
+      if: matrix.platform == 'linux' && steps.has_s3.outcome == 'success'
+      with:
+        aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        source: dist/rancher-desktop-*-linux.zip
+        dest: s3://rancher-desktop-assets-for-obs/${{ steps.zip_name.outputs.zip_name }}
+    - name: Trigger OBS services for relevant package in dev channel
+      if: matrix.platform == 'linux' && steps.has_s3.outcome == 'success'
+      run: |
+        curl -X POST \
+          -H "Authorization: Token ${OBS_WEBHOOK_TOKEN}" \
+          "https://build.opensuse.org/trigger/runservice?project=isv:Rancher:dev&package=rancher-desktop-${GITHUB_REF_NAME}"
+      env:
+        OBS_WEBHOOK_TOKEN: ${{ secrets.OBS_WEBHOOK_TOKEN }}
+
+  sign-win:
+    name: Test Signing (Windows)
+    needs: package
+    runs-on: windows-2022
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release-')) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+      (github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - name: Install Windows dependencies
+      shell: powershell
+      run: .\scripts\windows-setup.ps1 -SkipVisualStudio -SkipTools
+    - uses: actions/setup-go@v5
+      with:
+        go-version: '^1.21'
+        cache-dependency-path: src/go/**/go.sum
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '18.16.x'
+        cache: yarn
+      # Needs a network timeout for macos & windows. See https://github.com/yarnpkg/yarn/issues/8242 for more info
+    - run: yarn install --frozen-lockfile --network-timeout 1000000
+    - uses: actions/download-artifact@v4
+      name: Download artifact
+      with:
+        name: Rancher Desktop-win.zip
+    - name: Generate test signing certificate
+      shell: powershell
+      run: |
+        $cert = New-SelfSignedCertificate `
+          -Type Custom `
+          -Subject "CN=Rancher-Sandbox, C=CA" `
+          -KeyUsage DigitalSignature `
+          -CertStoreLocation Cert:\CurrentUser\My `
+          -FriendlyName "Rancher-Sandbox Code Signing" `
+          -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+        Write-Output $cert
+        Write-Output "CSC_FINGERPRINT=$($cert.Thumbprint)" `
+          | Out-File -Append -Encoding ASCII "${env:GITHUB_ENV}"
+      timeout-minutes: 1
+    - name: Sign artifact
+      shell: powershell
+      run: yarn sign (Get-Item "Rancher Desktop*-win.zip")
+      timeout-minutes: 10
+    - name: Verify installer signature
+      shell: powershell
+      run: |
+        $usedCert = (Get-AuthenticodeSignature -FilePath 'dist\Rancher Desktop Setup*.msi').SignerCertificate
+        Write-Output $usedCert
+        if ($usedCert.Thumbprint -ne $env:CSC_FINGERPRINT) {
+          Throw "Installer signed with wrong certificate"
+        }
+      timeout-minutes: 1
+
+  sign-mac:
+    name: Test Signing (macOS)
+    needs: package
+    strategy:
+      matrix:
+        include:
+        - arch: aarch64
+        # skip x86_64, we don't need to duplicate the testing for now.
+    runs-on: macos-12
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release-')) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+      (github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - uses: actions/setup-go@v5
+      with:
+        go-version: '^1.21'
+        cache-dependency-path: src/go/**/go.sum
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '18.16.x'
+        cache: yarn
+      # Needs a network timeout for macos & windows. See https://github.com/yarnpkg/yarn/issues/8242 for more info
+    - run: yarn install --frozen-lockfile --network-timeout 1000000
+    - uses: actions/download-artifact@v4
+      name: Download artifact
+      with:
+        name: Rancher Desktop-mac.${{ matrix.arch }}.zip
+    - name: Generate test signing certificate
+      run: |
+        openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem \
+          -keyform pem -sha256 -days 3650 -nodes -subj \
+          "/C=CA/CN=RD Test Signing Key" \
+          -addext keyUsage=critical,digitalSignature \
+          -addext extendedKeyUsage=critical,codeSigning
+        # Create a custom keychain so we can unlock it properly.
+        security create-keychain -p "" tmp.keychain
+        security default-keychain -d user -s tmp.keychain
+        security unlock-keychain -p "" tmp.keychain
+        security set-keychain-settings -u tmp.keychain # Disable keychain auto-lock
+        security import key.pem -k tmp.keychain -t priv -A
+        security import cert.pem -k tmp.keychain -t cert -A
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+          -k "" tmp.keychain
+        # Print out the valid certificates for debugging.
+        security find-identity
+        # Determine the key fingerprint.
+        awk_expr='/)/ { print $2 ; exit }'
+        hash="$(security find-identity | awk "$awk_expr")"
+        echo "CSC_FINGERPRINT=${hash}" >> "$GITHUB_ENV"
+      timeout-minutes: 1
+    - name: Flag build for M1
+      if: matrix.arch == 'aarch64'
+      run: echo "M1=1" >> "${GITHUB_ENV}"
+    - name: Sign artifact
+      run: |
+        for zip in Rancher\ Desktop-*mac*.zip; do
+          echo "::group::Signing ${zip}"
+          yarn sign --skip-notarize --skip-constraints "${zip}"
+          echo "::endgroup::"
+        done
+      timeout-minutes: 15
+    - name: Verify signature
+      run: |
+        codesign --verify --deep --strict --verbose=2 dist/*.dmg
+        codesign --verify --deep --strict --verbose=2 dist/*.zip
+      timeout-minutes: 5

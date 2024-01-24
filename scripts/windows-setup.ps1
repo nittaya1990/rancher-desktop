@@ -48,15 +48,12 @@ if (!$SkipTools) {
 
         Invoke-WebRequest -UseBasicParsing -Uri 'https://get.scoop.sh' `
             | Invoke-Expression
-        scoop bucket add versions
-        scoop install git go nvm python27
-        # Temporarily commented out until we can handle later versions of node.js:
-        # nvm install latest
-        # nvm use $(nvm list | Where-Object { $_ } | Select-Object -First 1)
-        nvm install 14.17.0
-        nvm use 14.17.0
-        # Install unzip to get kuberlr -- released only as a zip file
-        scoop install unzip
+        scoop install git go mingw nvm python unzip
+        # Install and use latest node 18* version
+        nvm install 18
+        nvm use $(nvm list | Select-String '[18\.[0-9.]+]' | Select-Object -First 1 | ForEach-Object { $_.Matches.Value })
+        # Install the yarn package manager
+        npm install --global yarn
     }
 }
 

@@ -1,90 +1,66 @@
-import path from 'path';
-import os from 'os';
-import { Application, SpectronClient } from 'spectron';
-import { BrowserWindow } from 'electron';
-import NavBarPage from './pages/navbar';
-import GeneralPage from './pages/general';
-import KubernetesPage from './pages/kubernetes';
-import PortForwardingPage from './pages/portforwarding';
-import ImagesPage from './pages/images';
-import TroubleshootingPage from './pages/troubleshooting';
-const electronPath = require('electron');
+import { test, expect, _electron } from '@playwright/test';
 
-jest.setTimeout(60_000);
+import { NavPage } from './pages/nav-page';
+import { createDefaultSettings, startRancherDesktop, teardown } from './utils/TestUtils';
 
-describe('Rancher Desktop', () => {
-  let app: Application;
-  let client: SpectronClient;
-  let browserWindow: BrowserWindow;
-  let navBarPage: NavBarPage;
+import type { ElectronApplication, Page } from '@playwright/test';
 
-  beforeAll(async() => {
-    app = new Application({
-      // 'any' typing is required for now as other alternate usage/import
-      //  cause issues running the tests. Without 'any' typescript
-      //  complains of type mismatch.
-      path: electronPath as any,
-      args: [path.dirname(__dirname)],
-    });
+let page: Page;
 
-    await app.start();
-    client = app.client;
-    browserWindow = app.browserWindow;
-    navBarPage = new NavBarPage(app);
+/**
+ * Using test.describe.serial make the test execute step by step, as described on each `test()` order
+ * Playwright executes test in parallel by default and it will not work for our app backend loading process.
+ * */
+test.describe.serial('Main App Test', () => {
+  let electronApp: ElectronApplication;
+
+  test.beforeAll(async() => {
+    createDefaultSettings();
+
+    electronApp = await startRancherDesktop(__filename);
+    page = await electronApp.firstWindow();
   });
 
-  afterAll(async() => {
-    if (app && app.isRunning()) {
-      await app.stop();
-    }
+  test.afterAll(() => teardown(electronApp, __filename));
+
+  test('should start loading the background services and hide progress bar', async() => {
+    const navPage = new NavPage(page);
+
+    await navPage.progressBecomesReady();
+    await expect(navPage.progressBar).toBeHidden();
   });
 
-  it('opens the window', async() => {
-    await client.waitUntilWindowLoaded();
-    // typescript doesn't see a value of await in below statement, but
-    // removing await makes the statement not wait till the app window loads
-    // Also, Alternate ways to get the app window title, for example using client
-    // didn't work. So, Leaving 'await' for now. We may need to review this and
-    // fix this in future.
-    const title = await browserWindow.getTitle();
+  test('should land on General page', async() => {
+    const navPage = new NavPage(page);
 
-    expect(title).toBe('Rancher Desktop');
+    await expect(navPage.mainTitle).toHaveText('Welcome to Rancher Desktop by SUSE');
   });
 
-  it('should display welcome message in general tab', async() => {
-    const generalPage = await navBarPage.getGeneralPage();
+  test('should navigate to Port Forwarding and check elements', async() => {
+    const navPage = new NavPage(page);
+    const portForwardPage = await navPage.navigateTo('PortForwarding');
 
-    expect(generalPage).not.toBeNull();
-    expect(await generalPage?.getTitle()).toBe('Welcome to Rancher Desktop');
+    await expect(navPage.mainTitle).toHaveText('Port Forwarding');
+    await expect(portForwardPage.content).toBeVisible();
+    await expect(portForwardPage.table).toBeVisible();
+    await expect(portForwardPage.fixedHeader).toBeVisible();
   });
 
-  it('should switch to Kubernetes Settings tab', async() => {
-    const kubernetesPage = await navBarPage.getKubernetesPage();
+  test('should navigate to Images page', async() => {
+    const navPage = new NavPage(page);
+    const imagesPage = await navPage.navigateTo('Images');
 
-    expect(kubernetesPage).not.toBeNull();
-    expect(await kubernetesPage?.getResetKubernetesButtonText()).toBe('Reset Kubernetes');
+    await expect(navPage.mainTitle).toHaveText('Images');
+    await expect(imagesPage.table).toBeVisible();
   });
 
-  it('should switch to Port Forwarding tab', async() => {
-    const portForwardingPage = await navBarPage.getPortForwardingPage();
+  test('should navigate to Troubleshooting and check elements', async() => {
+    const navPage = new NavPage(page);
+    const troubleshootingPage = await navPage.navigateTo('Troubleshooting');
 
-    if (os.platform().startsWith('win')) {
-      expect(portForwardingPage).not.toBeNull();
-    } else {
-      expect(portForwardingPage).toBeNull();
-    }
-  });
-
-  it('should switch to Images tab', async() => {
-    const imagesPage = await navBarPage.getImagesPage();
-
-    expect(imagesPage).not.toBeNull();
-  });
-
-  it('should switch to Troubleshooting tab', async() => {
-    const troubleShootingPage = await navBarPage.getTroubleshootingPage();
-
-    expect(troubleShootingPage).not.toBeNull();
-    expect(await troubleShootingPage?.getFactoryResetButtonText()).toBe('Factory Reset');
+    await expect(navPage.mainTitle).toHaveText('Troubleshooting');
+    await expect(troubleshootingPage.troubleshooting).toBeVisible();
+    await expect(troubleshootingPage.logsButton).toBeVisible();
+    await expect(troubleshootingPage.factoryResetButton).toBeVisible();
   });
 });

@@ -16,7 +16,7 @@ In general, the process involves:
 3. Run the signing tool:
 
     ```sh
-    npm run sign -- path/to/archive.zip
+    yarn sign path/to/archive.zip
     ```
 
 4. Look in `dist/` for the signed files (`Rancher Desktop Setup.exe`, etc.).
@@ -26,9 +26,9 @@ In general, the process involves:
 On Windows, it is necessary to obtain a code signing certificate that can be
 used with the Windows infrastructure.  It is then necessary to determine the
 fingerprint of the certificate, and set it as the `CSC_FINGERPRINT` environment
-variable before running `npm run sign`.
+variable before running `yarn sign`.
 
-### Generate a Test Certficate
+### Generate a Test Certificate
 
 For testing purposes, we can generate a certificate locally by running the
 following command in PowerShell:
@@ -59,3 +59,81 @@ must search the output for your signing certificate and locate the
 `Cert Hash(sha1):` entry.  That hash is then used for `CSC_FINGERPRINT` above.
 
 [YubiKey Minidriver]: https://www.yubico.com/support/download/smart-card-drivers-tools/
+
+### Verifying the Signed Product
+
+In explorer, right-click on the final `.exe` file, choose `Properties`, `Digital Signatures`,
+and verify that `Suse LLC` is listed in the Signature List.
+
+## macOS
+
+On macOS, a signing certificate from Apple is required (via their developer
+program).  Please refer to [Apple Documentation] for details.  Note that a
+_Mac Development_ certificate is insufficient for notarization; it must be a
+_Developer ID Application_ certificate.  This will be reflected in the Common
+Name of the certificate.
+
+Launch constraints require macOS Ventura (macOS 13) or newer.  This is therefore
+needed for production signing.
+
+[Apple Documentation]: https://developer.apple.com/help/account/create-certificates/create-developer-id-certificates
+
+### Generate a test certificate
+
+If a real certificate from Apple is unavailable, it is possible to generate a
+self-signed test certificate; however, note that this wouldn't properly exercise
+all of the signing code.
+
+```sh
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem \
+          -keyform pem -sha256 -days 3650 -nodes -subj \
+          "/C=XX/ST=NA/L=Some Town/O=No Org/OU=No Unit/CN=RD Test Signing Key" \
+          -addext keyUsage=critical,digitalSignature \
+          -addext extendedKeyUsage=critical,codeSigning
+security import key.pem -t priv -A
+security import cert.pem -t cert -A
+security set-key-partition-list -S apple-tool:,apple:,codesign: -s
+security add-trusted-cert -p codeSign cert.pem
+```
+
+### Configuring Access
+
+- Import your signing certificate into your macOS Keychain.
+- Run `security find-identity -v` to locate the fingerprint of the key to use.
+  Export the long hex string as the `CSC_FINGERPRINT` environment variable.
+  - For a test certificate, use `security find-identity` without `-v`; the
+    certificate to use isn't valid.
+
+For notarization, the following environment variables are also needed:
+
+- `APPLEID`
+  - This is your Apple ID login; for example, `john.doe@example.com`
+- `AC_PASSWORD`
+  - This is an application-specific password for your Apple ID; to create it:
+    1. Navigate to https://appleid.apple.com/account/manage
+    2. Click on _App-Specific Passwords_ at the bottom.
+    3. Create one (with a label of your choice) and copy the resulting password.
+- `AC_TEAMID`
+  - This is the Apple Team ID.  This is the _Organizational Unit (OU)_ field of
+    the subject of your signing certificate; for Rancher Desktop / SUSE, this is
+    `2Q6FHJR3H3`. <!-- spellcheck-ignore-line -->
+    (This value can be extracted from the published application.)
+
+### Performing signing
+
+When signing for M1/aarch64, please set the `M1` environment variable ahead of
+time as usual.
+
+If notarization is not required, append `--skip-notarize` to the command:
+
+  ```sh
+  yarn sign --skip-notarize path/to/archive.zip
+  ```
+
+This is necessary to test the signing flow (since there's no way to notarize
+without the production certificate).  This is also necessary to use a test
+certificate (since Apple will reject it).
+
+When using an older version of macOS (12/Monterey or older),
+`--skip-constraints` is also needed to skip assigning launch constraints, as
+that requires Ventura or later.  This is inappropriate for the actual release.

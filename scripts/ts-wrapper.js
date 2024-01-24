@@ -5,6 +5,10 @@
  * fine elsewhere, but not on the command line.
  */
 
+// Load tsconfig-paths so that ts-node can resolve files based on the 'paths'
+// compiler options key in tsconfig.json.
+require('tsconfig-paths/register');
+
 const { main: tsNodeMain } = require('ts-node/dist/bin');
 
 function main(args) {
@@ -12,5 +16,7 @@ function main(args) {
 }
 
 if (require.main === module) {
+  // Silence BrowsersList warnings because they're pointless for us
+  process.env.BROWSERSLIST_IGNORE_OLD_DATA = 'true'; // spellcheck-ignore-line
   main(process.argv.slice(2));
 }

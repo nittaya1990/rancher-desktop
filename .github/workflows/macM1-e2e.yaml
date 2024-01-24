@@ -1,0 +1,109 @@
+name: e2e tests on Mac M1
+
+on:
+  workflow_dispatch:
+  schedule:
+  - cron: '15 8 * * 1-5'
+
+jobs:
+
+  e2e-tests:
+    timeout-minutes: 45
+    runs-on: [self-hosted, macos-latest, arm64]
+    env:
+      M1: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: main
+      # For compatibility with runners without yarn, we need to install node
+      # once, install yarn, then install node again to get caching.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18.16.x'
+      - run: npm install --global yarn
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18.16.x'
+          cache: yarn
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '^1.21'
+          cache-dependency-path: src/go/**/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: pip install setuptools
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+        #The next steps is a workaround for an unexpected failure in launching electron before running e2e tests
+        #Such failure is addressed in issue #2915
+      - name: add tools to PATH
+        run: |
+          rm -fr $HOME/.rd/bin
+          mkdir -p $HOME/.rd/bin
+          cp -rf $HOME/actions-runner/_work/rancher-desktop/rancher-desktop/resources/darwin/bin/ $HOME/.rd/bin/
+          export PATH="$HOME/.rd/bin:$PATH"
+      - name: Disable admin-access before start up
+        run: |
+          mkdir -p $HOME/Library/Preferences/rancher-desktop
+          touch $HOME/Library/Preferences/rancher-desktop/settings.json
+          cat <<EOF > $HOME/Library/Preferences/rancher-desktop/settings.json
+          {
+            "version": 5,
+            "application": {
+              "adminAccess": false
+              "updater":  { "enabled": false },
+            },
+            "virtualMachine" {
+              "memoryInGB": 6,
+            },
+            "pathManagementStrategy": "rcfiles"
+          }
+          EOF
+      - name: Run Rancher Desktop in dev
+        run: |
+          yarn dev -- --no-modal-dialogs &
+          sleep 200
+          $HOME/.rd/bin/rdctl shutdown
+          wait
+      - name: Run e2e Tests
+        continue-on-error: false
+        run: yarn test:e2e
+      - name: Failed tests
+        if: failure()
+        run: mkdir -p ./e2e/reports
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2etest-artifacts
+          path: ./e2e/reports/*
+      - name: Cleanup test environment
+        run: |
+          #set -x
+          cd $HOME/Library
+          pushd Logs/rancher-desktop
+          for x in *.log ; do
+           echo -n '' > $x
+          done
+          popd
+          rm -fr "Application Support/rancher-desktop"
+          rm -fr Preferences/rancher-desktop
+          rm -fr Caches/rancher-desktop/k3s-versions.json
+          cd $HOME/.rd/bin
+          for x in helm kubectl nerdctl docker ; do
+           if [[ -L $x ]] ; then # && $(readlink $x):]] ; then
+           rm -f $x
+           fi
+          done
+        if: always()
+      - name: End stray processes
+        run: |
+          for x in nuxt qemu ; do
+           echo $x
+           ps auxww | grep $x
+          done
+          ps auxww | grep rancher | grep -vi -e goland
+        if: always()
